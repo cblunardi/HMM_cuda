@@ -57,6 +57,7 @@ set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY})
 ### build custom libraries
 cuda_add_library(
 hmmkernel
+log_helper.cu
 kernel_forward.cu
 kernel_forward.h
 kernel_backward.cu

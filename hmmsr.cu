@@ -12,6 +12,8 @@
 #include "kernel_backward.h"
 #include "kernel_bw.h"
 
+#include "log_helper.h"
+
 #ifndef TILE
 	#define TILE 16	// 2D Kernel Tiling
 #endif
@@ -102,6 +104,11 @@ float *ll_d;
 float *beta_d;
 float *betaB_d;
 
+int test_mode = 0;
+char *goldFile;
+float *host_sigma_sym, *host_mu, *host_gamma_obs;
+float *gold_sigma_sym, *gold_mu, *gold_gamma_obs;
+
 // em 
 float *xi_sum_d;
 float *alpha_beta_d;
@@ -141,16 +148,33 @@ void Release();
 //---------------------------------------------------------------------------//
 int main(int argc, char *argv[])
 {
-	if(argc != 3){
+	if(argc != 5){
 		puts("Please specify the number of hidden states N and cuda streams K.");
-		puts("e.g., $./gpuhmmsr N K (N should be multiples of 16)\nExit Program!");
+		puts("e.g., $./gpuhmmsr <GENERATE/CHECK> N K <GOLD PATH> (N should be multiples of 16)\nExit Program!");
 		exit(1);
 	}
+	if (!strcmp(argv[1], "GENERATE"))
+	{
+		test_mode = 0;
+		printf("GENERATE mode enabled.\n");
+	}
+	else if (!strcmp(argv[1], "CHECK"))
+	{
+		test_mode = 1;
+		printf("CHECK mode enabled.\n");
+	}
+	else
+	{
+		printf("Undefined working mode, use GENERATE or CHECK.\n");
+		exit(0);
+	}
+	goldFile = argv[3];	
+	
 
-	N = atoi(argv[1]);
+	N = atoi(argv[2]);
 	printf("Hidden States: %d\n", N);
 
-	nstreams = atoi(argv[2]);
+	nstreams = atoi(argv[3]);
 #if HQ
 	printf("Use Hyper-Q feature, with %d cuda streams.\n\n", nstreams);
 #else
@@ -158,40 +182,152 @@ int main(int argc, char *argv[])
 #endif
 
 
+	//-----------------------------------------------------------------------//
+	// size of arrays
+	//-----------------------------------------------------------------------//
+	bytes_nn  = sizeof(float) * N * N;
+	bytes_nt  = sizeof(float) * N * T;
+	bytes_n   = sizeof(float) * N;
+	bytes_dt  = sizeof(float) * D * T;
+	bytes_dd  = sizeof(float) * D * D;
+	bytes_dn  = sizeof(float) * D * N ;
+	bytes_ddn = sizeof(float) * D * D * N ;
+	bytes_t   = sizeof(float) * T;
+	bytes_d   = sizeof(float) * D;
+	bytes_n   = sizeof(float) * N;
+	dd        = D * D;
+
+
 	printf("=> Start program.\n\n");
 
-	//-----------------------------------------------------------------------//
-	// HMM Parameters
-	//	a,b,pi,alpha
-	//-----------------------------------------------------------------------//
-	printf("(1) Initialize parameters.\n");
-	HMM_Param();
+	host_sigma_sym = (float*)malloc(bytes_dd);
+	host_mu = (float*)malloc(bytes_dn);
+	host_gamma_obs = (float*)malloc(bytes_dt);
+	
+	if (test_mode)
+	{ // CHECK	
+		FILE *fgold;
 
-	//-----------------------------------------------------------------------//
-	// Forward Algorithm on GPU 
-	//-----------------------------------------------------------------------//
-	printf("\n");
-	printf("(2) Forward Algorithm on GPU.\n");
-	GPU_HMM_Forward();
+		gold_sigma_sym = (float*)malloc(bytes_dd);
+		gold_mu = (float*)malloc(bytes_dn);
+		gold_gamma_obs = (float*)malloc(bytes_dt);
 
-	//-----------------------------------------------------------------------//
-	// Backward Algorithm on GPU 
-	//-----------------------------------------------------------------------//
-	printf("\n");
-	printf("(3) Backward Algorithm on GPU.\n");
-	GPU_HMM_Backward();
+		fgold = fopen(goldFile, "rb");
+		if (!fgold)
+		{
+			printf("Could not open gold.\n");
+			exit(0);
+		}
+		// Caio: output format: SIGMA_SYM MU GAMMA_OBS
+		fread(gold_sigma_sym, bytes_dd, 1, fgold);
+		fread(gold_mu, bytes_dn, 1, fgold);
+		fread(gold_gamma_obs, bytes_dt, 1, fgold);
 
-	//-----------------------------------------------------------------------//
-	// Baum-Welch Algorithm on GPU 
-	//-----------------------------------------------------------------------//
-	printf("\n");
-	printf("(4) Baum-Welch Algorithm on GPU.\n");
-	GPU_HMM_BaumWelch();
+		fclose(fgold);
 
-	//-----------------------------------------------------------------------//
-	// Release resources
-	//-----------------------------------------------------------------------//
-	Release();
+	}
+
+	char test_info[90];
+	snprintf(test_info, 90, "hidden_states:%d, streams:%d", N, nstreams);
+	start_log_file("cudaHMM-BW", test_info);
+
+	for (int loop1 = 0; loop1 < 1000000; loop1++)
+	{
+
+		//-----------------------------------------------------------------------//
+		// HMM Parameters
+		//	a,b,pi,alpha
+		//-----------------------------------------------------------------------//
+		printf("(1) Initialize parameters.\n");
+		HMM_Param();
+
+		//-----------------------------------------------------------------------//
+		// Forward Algorithm on GPU 
+		//-----------------------------------------------------------------------//
+		//printf("\n");
+		//printf("(2) Forward Algorithm on GPU.\n");
+		//GPU_HMM_Forward();
+
+		//-----------------------------------------------------------------------//
+		// Backward Algorithm on GPU 
+		//-----------------------------------------------------------------------//
+		//printf("\n");
+		//printf("(3) Backward Algorithm on GPU.\n");
+		//GPU_HMM_Backward();
+
+		//-----------------------------------------------------------------------//
+		// Baum-Welch Algorithm on GPU 
+		//-----------------------------------------------------------------------//
+		printf("\n");
+		printf("(4) Baum-Welch Algorithm on GPU.\n");
+		GPU_HMM_BaumWelch();
+
+		checkCudaErrors(cudaMemcpy(expect_sigma_sym_d, host_sigma_sym, bytes_dd, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(expect_mu_d, host_mu, bytes_dn, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(gamma_obs_d, host_gamma_obs, bytes_dt, cudaMemcpyDeviceToHost));
+
+		if (!test_mode)
+		{ // GENERATE	
+			FILE *fgold;
+			fgold = fopen(goldFile, "wb");
+			if (!fgold)
+			{
+				printf("Could not open gold.\n");
+				exit(0);
+			}
+			// Caio: output format: SIGMA_SYM MU GAMMA_OBS
+			fwrite(host_sigma_sym, bytes_dd, 1, fgold);
+			fwrite(host_mu, bytes_dn, 1, fgold);
+			fwrite(host_gamma_obs, bytes_dt, 1, fgold);
+
+			fclose(fgold);
+		}
+		else
+		{ // CHECK
+			char error_detail[150];
+			int kernel_errors = 0;
+			for (int it=0; it<D * D; it++)
+			{
+				if (host_sigma_sym[it] != gold_sigma_sym[it])
+				{
+					snprintf(error_detail, 150, "t: sigma_sym, p: [%d, %d], r: %1.16e, e: %1.16e", it/D, it%D, host_sigma_sym[it], gold_sigma_sym[it]);
+					log_error_detail(error_detail);
+					printf("%s\n", error_detail);
+					kernel_errors++;
+				}
+			}
+			for (int it=0; it<D * N; it++)
+			{
+				if (host_mu[it] != gold_mu[it])
+				{
+					snprintf(error_detail, 150, "t: mu, p: [%d, %d], r: %1.16e, e: %1.16e", it/D, it%D, host_mu[it], gold_mu[it]);
+					log_error_detail(error_detail);
+					printf("%s\n", error_detail);
+					kernel_errors++;
+				}
+			}
+			for (int it=0; it<D * T; it++)
+			{
+				if (host_gamma_obs[it] != gold_gamma_obs[it])
+				{
+					snprintf(error_detail, 150, "t: gamma_obs, p: [%d, %d], r: %1.16e, e: %1.16e", it/D, it%D, host_gamma_obs[it], gold_gamma_obs[it]);
+					log_error_detail(error_detail);
+					printf("%s\n", error_detail);
+					kernel_errors++;
+				}
+			}
+			log_error_count(kernel_errors);
+		
+			if (!loop1%10)
+				printf("\nTest number: %d\n", loop1);
+			printf(".");
+		}
+
+		//-----------------------------------------------------------------------//
+		// Release resources
+		//-----------------------------------------------------------------------//
+		Release();
+	}
 	printf("\n<= End program.\n");
 
 	return 0;
@@ -739,5 +875,5 @@ void GPU_HMM_BaumWelch()
 	sdkStopTimer(&timer);                                                                           
 	double runtime = sdkGetTimerValue(&timer);                                                      
 
-	printf("    Elapsed Time = %lf ms\n", runtime);      
+	//printf("    Elapsed Time = %lf ms\n", runtime);      
 }
