@@ -224,12 +224,11 @@ int main(int argc, char *argv[])
 		fread(gold_gamma_obs, bytes_dt, 1, fgold);
 
 		fclose(fgold);
-
+		
+		char test_info[90];
+		snprintf(test_info, 90, "hidden_states:%d, streams:%d", N, nstreams);
+		start_log_file("cudaHMM-BW", test_info);
 	}
-
-	char test_info[90];
-	snprintf(test_info, 90, "hidden_states:%d, streams:%d", N, nstreams);
-	start_log_file("cudaHMM-BW", test_info);
 
 	for (int loop1 = 0; loop1 < 1000000; loop1++)
 	{
@@ -238,7 +237,7 @@ int main(int argc, char *argv[])
 		// HMM Parameters
 		//	a,b,pi,alpha
 		//-----------------------------------------------------------------------//
-		printf("(1) Initialize parameters.\n");
+		//printf("(1) Initialize parameters.\n");
 		HMM_Param();
 
 		//-----------------------------------------------------------------------//
@@ -258,9 +257,11 @@ int main(int argc, char *argv[])
 		//-----------------------------------------------------------------------//
 		// Baum-Welch Algorithm on GPU 
 		//-----------------------------------------------------------------------//
-		printf("\n");
-		printf("(4) Baum-Welch Algorithm on GPU.\n");
+		//printf("\n");
+		//printf("(4) Baum-Welch Algorithm on GPU.\n");
+		if (test_mode) start_iteration();
 		GPU_HMM_BaumWelch();
+		if (test_mode) end_iteration();
 
 		checkCudaErrors(cudaMemcpy(expect_sigma_sym_d, host_sigma_sym, bytes_dd, cudaMemcpyDeviceToHost));
 		checkCudaErrors(cudaMemcpy(expect_mu_d, host_mu, bytes_dn, cudaMemcpyDeviceToHost));
