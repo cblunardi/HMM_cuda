@@ -249,14 +249,14 @@ int main(int argc, char *argv[])
 		//-----------------------------------------------------------------------//
 		//printf("\n");
 		//printf("(2) Forward Algorithm on GPU.\n");
-		//GPU_HMM_Forward();
+		GPU_HMM_Forward();
 
 		//-----------------------------------------------------------------------//
 		// Backward Algorithm on GPU 
 		//-----------------------------------------------------------------------//
 		//printf("\n");
 		//printf("(3) Backward Algorithm on GPU.\n");
-		//GPU_HMM_Backward();
+		GPU_HMM_Backward();
 
 		//-----------------------------------------------------------------------//
 		// Baum-Welch Algorithm on GPU 
@@ -323,9 +323,9 @@ int main(int argc, char *argv[])
 			}
 			log_error_count(kernel_errors);
 		
-			if (!loop1%10)
+			if (!(loop1%10))
 				printf("\nTest number: %d\n", loop1);
-			printf(".");
+			printf("."); fflush(stdout);
 		}
 
 		//-----------------------------------------------------------------------//
@@ -590,7 +590,7 @@ void GPU_HMM_Forward()
 	sdkStopTimer(&timer);                                                                           
 	double runtime = sdkGetTimerValue(&timer);                                                      
 
-	printf("    Elapsed Time = %lf ms\n", runtime);      
+//	printf("    Elapsed Time = %lf ms\n", runtime);      
 
 	// copy the log likelihood back to host
 	//checkCudaErrors(cudaMemcpyAsync(lll, &ll_d[T], sizeof(float), cudaMemcpyDeviceToHost));
@@ -653,13 +653,13 @@ void GPU_HMM_Backward()
 	checkCudaErrors(cudaDeviceSynchronize());                                                       
 	sdkStopTimer(&timer);                                                                           
 
-	printf("    Elapsed Time = %lf ms\n", sdkGetTimerValue(&timer));      
+	//printf("    Elapsed Time = %lf ms\n", sdkGetTimerValue(&timer));      
 }
 
 void GPU_HMM_BaumWelch()
 {
 	// Initialize cublas
-	ret = cublasInit();
+	/*ret = cublasInit();
 	if (ret != CUBLAS_STATUS_SUCCESS) 
 	{
 		fprintf (stderr, "ERROR: CUBLAS Initialization failure\n");
@@ -670,7 +670,7 @@ void GPU_HMM_BaumWelch()
 	ret  = cublasCreate(&handle1);
 
 	// Make sure the data remain on the device 
-	cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
+	cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);*/
 	/// start timer
 	checkCudaErrors(cudaDeviceSynchronize());                                                       
 	sdkStartTimer(&timer);  
