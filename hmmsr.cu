@@ -106,8 +106,8 @@ float *betaB_d;
 
 int test_mode = 0;
 char *goldFile;
-float *host_sigma_sym, *host_mu, *host_gamma_obs;
-float *gold_sigma_sym, *gold_mu, *gold_gamma_obs;
+float *host_sigma, *host_mu, *host_gamma_obs;
+float *gold_sigma, *gold_mu, *gold_gamma_obs;
 
 // em 
 float *xi_sum_d;
@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
 		printf("Undefined working mode, use GENERATE or CHECK.\n");
 		exit(0);
 	}
-	goldFile = argv[3];	
+	goldFile = argv[4];	
 	
 
 	N = atoi(argv[2]);
@@ -200,7 +200,7 @@ int main(int argc, char *argv[])
 
 	printf("=> Start program.\n\n");
 
-	host_sigma_sym = (float*)malloc(bytes_dd);
+	host_sigma = (float*)malloc(bytes_ddn);
 	host_mu = (float*)malloc(bytes_dn);
 	host_gamma_obs = (float*)malloc(bytes_dt);
 	
@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
 	{ // CHECK	
 		FILE *fgold;
 
-		gold_sigma_sym = (float*)malloc(bytes_dd);
+		gold_sigma = (float*)malloc(bytes_ddn);
 		gold_mu = (float*)malloc(bytes_dn);
 		gold_gamma_obs = (float*)malloc(bytes_dt);
 
@@ -219,7 +219,7 @@ int main(int argc, char *argv[])
 			exit(0);
 		}
 		// Caio: output format: SIGMA_SYM MU GAMMA_OBS
-		fread(gold_sigma_sym, bytes_dd, 1, fgold);
+		fread(gold_sigma, bytes_ddn, 1, fgold);
 		fread(gold_mu, bytes_dn, 1, fgold);
 		fread(gold_gamma_obs, bytes_dt, 1, fgold);
 
@@ -230,7 +230,11 @@ int main(int argc, char *argv[])
 		start_log_file("cudaHMM-BW", test_info);
 	}
 
-	for (int loop1 = 0; loop1 < 1000000; loop1++)
+	int niterations = 1000000;
+	if (!test_mode)
+		niterations=1; 
+
+	for (int loop1 = 0; loop1 < niterations; loop1++)
 	{
 
 		//-----------------------------------------------------------------------//
@@ -263,9 +267,9 @@ int main(int argc, char *argv[])
 		GPU_HMM_BaumWelch();
 		if (test_mode) end_iteration();
 
-		checkCudaErrors(cudaMemcpy(expect_sigma_sym_d, host_sigma_sym, bytes_dd, cudaMemcpyDeviceToHost));
-		checkCudaErrors(cudaMemcpy(expect_mu_d, host_mu, bytes_dn, cudaMemcpyDeviceToHost));
-		checkCudaErrors(cudaMemcpy(gamma_obs_d, host_gamma_obs, bytes_dt, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(host_sigma, expect_sigma_d, bytes_ddn, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(host_mu, expect_mu_d, bytes_dn, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(host_gamma_obs, gamma_obs_d, bytes_dt, cudaMemcpyDeviceToHost));
 
 		if (!test_mode)
 		{ // GENERATE	
@@ -277,7 +281,7 @@ int main(int argc, char *argv[])
 				exit(0);
 			}
 			// Caio: output format: SIGMA_SYM MU GAMMA_OBS
-			fwrite(host_sigma_sym, bytes_dd, 1, fgold);
+			fwrite(host_sigma, bytes_ddn, 1, fgold);
 			fwrite(host_mu, bytes_dn, 1, fgold);
 			fwrite(host_gamma_obs, bytes_dt, 1, fgold);
 
@@ -287,11 +291,11 @@ int main(int argc, char *argv[])
 		{ // CHECK
 			char error_detail[150];
 			int kernel_errors = 0;
-			for (int it=0; it<D * D; it++)
+			for (int it=0; it<D * D * N; it++)
 			{
-				if (host_sigma_sym[it] != gold_sigma_sym[it])
+				if (host_sigma[it] != gold_sigma[it])
 				{
-					snprintf(error_detail, 150, "t: sigma_sym, p: [%d, %d], r: %1.16e, e: %1.16e", it/D, it%D, host_sigma_sym[it], gold_sigma_sym[it]);
+					snprintf(error_detail, 150, "t: sigma, p: [%d], r: %1.16e, e: %1.16e", it, host_sigma[it], gold_sigma[it]);
 					log_error_detail(error_detail);
 					printf("%s\n", error_detail);
 					kernel_errors++;
@@ -654,6 +658,19 @@ void GPU_HMM_Backward()
 
 void GPU_HMM_BaumWelch()
 {
+	// Initialize cublas
+	ret = cublasInit();
+	if (ret != CUBLAS_STATUS_SUCCESS) 
+	{
+		fprintf (stderr, "ERROR: CUBLAS Initialization failure\n");
+		exit(EXIT_FAILURE);
+	}
+
+	ret  = cublasCreate(&handle);
+	ret  = cublasCreate(&handle1);
+
+	// Make sure the data remain on the device 
+	cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE);
 	/// start timer
 	checkCudaErrors(cudaDeviceSynchronize());                                                       
 	sdkStartTimer(&timer);  
